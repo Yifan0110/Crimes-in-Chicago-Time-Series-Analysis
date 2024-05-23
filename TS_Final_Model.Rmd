@@ -1,0 +1,140 @@
+---
+title: "ADSP31006_FinalProject"
+author: "Marian Xu"
+date: "2024-05-15"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+Sys.setlocale("LC_TIME", "C")
+library(dplyr)
+library(zoo) 
+library(forecast)
+library(TSA)
+library(Metrics)
+library(hts)
+library(ggplot2)
+```
+
+# Prepare Data
+
+## crime data
+```{r}
+crime_clean <- read.csv("~/Documents/ADSP31006/crime_clean (1).csv")
+crime_clean$Date <- as.yearmon(crime_clean$Date, "%Y-%m")
+```
+
+```{r}
+# Convert the entire dataset into a time series object
+crime_ts <- ts(crime_clean[, -1], start = c(2001, 1), frequency = 12)
+
+train_ts <- window(crime_ts, start = c(2001, 1), end = c(2021, 12))
+test_ts <- window(crime_ts, start = c(2022, 1), end = c(2022, 12))
+```
+
+
+## HTS
+
+```{r}
+nodes <- list(5, c(1, 1, 1, 1, 1))
+hts_data <- hts(train_ts, nodes = nodes)
+hts_pred <- forecast(hts_data, h=12)
+plot(hts_pred)
+```
+```{r}
+# Plot the total series forecast
+plot(hts_pred, levels = 0)
+title(main = "Total Series Forecast")
+
+# Plot the first level of the hierarchy forecast
+plot(hts_pred, levels = 1)
+title(main = "First Level of Hierarchy Forecast")
+
+# Plot the bottom level series forecasts
+plot(hts_pred, levels = 2)
+title(main = "Bottom Level Series Forecasts")
+
+
+
+```
+```{r}
+# Plot the total series forecast
+plot(hts_pred, levels = 0)
+
+
+# Plot the first level of the hierarchy forecast
+plot(hts_pred, levels = 1)
+
+
+# Plot the bottom level series forecasts
+plot(hts_pred, levels = 2)
+
+
+```
+
+
+```{r}
+forecast::accuracy(hts_pred$bts[,1], test_ts[,1])
+smape(hts_pred$bts[,1], test_ts[,1])
+```
+
+```{r}
+hts_pred_ts <- ts(hts_pred$bts[,1], start = c(2022, 1),end = c(2022, 12), frequency = 12)
+
+# Plot the forecasts and include training data
+autoplot(train_ts, series="Training Data") +
+  autolayer(test_ts, series="Test Data") +
+  autolayer(hts_pred_ts, series="Best HTS Forecast") +
+  ggtitle("Best HTS Forecast vs Actual") +
+  xlab("Year") + ylab("Total Cases") +
+  theme_minimal() +
+  guides(colour=guide_legend(title="Series"))
+
+```
+
+```{r}
+crime_data<- read.csv("~/Documents/ADSP31006/crime_data_type.csv")
+```
+
+```{r}
+
+# Convert Date column to yearmon format
+crime_data$Date <- as.yearmon(crime_data$Date, "%Y-%m")
+
+# Convert total_cases to a time series object
+crime_ts <- ts(crime_data$total_cases, start = c(2001, 1), frequency = 12)
+
+# Split into training and test datasets
+train_ts <- window(crime_ts, start = c(2001, 1), end = c(2021, 12))
+test_ts <- window(crime_ts, start = c(2022, 1), end = c(2022, 12))
+
+# Perform Holt-Winters exponential smoothing
+hw_model <- HoltWinters(train_ts)
+
+# Forecast the next 12 months
+hw_forecast <- forecast(hw_model, h=12)
+
+# Plot the forecast
+plot(hw_forecast, main="Holt-Winters Forecast", xlab="Year", ylab="Total Cases")
+lines(test_ts, col='red')
+
+# Print the forecasted values
+print(hw_forecast)
+
+```
+
+```{r}
+# Fit the Holt-Winters model
+hw_model <- hw(train_ts, seasonal = "multiplicative")
+summary(hw_model)
+
+# Forecast using the Holt-Winters model
+hw_forecast <- forecast(hw_model, h = length(test_ts))
+print(hw_forecast)
+
+# Extract the forecasted mean values
+forecasted_values <- hw_forecast$mean
+print(forecasted_values)
+```
+
