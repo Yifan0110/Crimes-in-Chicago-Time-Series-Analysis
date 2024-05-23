@@ -1,0 +1,269 @@
+---
+title: "TS_Final_BSTS"
+author: "Liuyi Pan"
+date: "2024-05-15"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+Sys.setlocale("LC_TIME", "C")
+library(dplyr)
+library(zoo) 
+library(forecast)
+library(TSA)
+library(Metrics)
+library(bsts)
+library(reshape2)
+library(ggplot2)
+library(gridExtra)
+```
+
+# Prepare Data
+
+## crime data
+```{r}
+crime_clean <- read.csv('crime_clean.csv')
+crime_clean$Date <- as.yearmon(crime_clean$Date, "%Y-%m")
+```
+
+```{r}
+# Convert the entire dataset into a time series object
+crime_ts <- ts(crime_clean[, 2], start = c(2001, 1), frequency = 12)
+train_ts <- window(crime_ts, start = c(2001, 1), end = c(2021, 12))
+test_ts <- window(crime_ts, start = c(2022, 1), end = c(2022, 12))
+```
+
+```{r}
+library(tseries)
+adf.test(diff(train_ts,12))
+```
+
+## unemployment rate data
+```{r}
+unrate_clean <- read.csv('unrate.csv')
+unrate_clean$Date <- as.yearmon(unrate_clean$Date, "%Y-%m")
+```
+
+```{r}
+# Convert the entire dataset into a time series object
+unrate_ts <- ts(unrate_clean[, 2], start = c(2001, 1), frequency = 12)
+unrate_train_ts <- window(unrate_ts, start = c(2001, 1), end = c(2021, 12))
+unrate_test_ts <- window(unrate_ts, start = c(2022, 1),end = c(2022, 12))
+```
+
+
+
+# EDA
+```{r, fig.height=4, fig.width=9}
+autoplot(train_ts, series="Training Data", color = "darkgreen")
+```
+
+```{r, fig.height=4, fig.width=9}
+crime_clean$Date <- as.Date(crime_clean$Date)
+
+# Filter the data for the years 2001 to 2021
+crime_clean_filtered <- crime_clean %>%
+  filter(Date >= as.Date("2001-01-01") & Date <= as.Date("2021-12-31"))
+
+# Extract the month from the date
+crime_clean_filtered$month <- format(crime_clean_filtered$Date, "%B")
+
+# Aggregate the data by month
+monthly_agg <- crime_clean_filtered %>%
+  group_by(month) %>%
+  summarize(total_cases = sum(total_cases))
+
+# Ensure the months are ordered correctly
+monthly_agg$month <- factor(monthly_agg$month, levels = month.name)
+
+# Plot the data
+ggplot(monthly_agg, aes(x = month, y = total_cases)) +
+  geom_bar(stat = "identity", fill = "grey") +
+  theme_minimal() +
+  ggtitle("Total Crime Cases by Month (2001-2021)") +
+  xlab("Month") +
+  ylab("Total Cases")
+```
+
+
+
+## Outliers
+
+```{r}
+# check outliers
+outliers <- tsoutliers(train_ts)
+outlier_indices <- outliers$index
+outlier_replacements <- outliers$replacements
+
+# Assuming the start year and month
+start_year <- 2001
+start_month <- 1
+
+# Function to calculate date from index
+index_to_date <- function(index, start_year, start_month, frequency) {
+  months_since_start <- index - 1  # zero-based index for months since start
+  year <- start_year + months_since_start %/% frequency
+  month <- start_month + months_since_start %% frequency
+  if (month > 12) {
+    year <- year + 1
+    month <- month - 12
+  }
+  print(month)
+  month <- round(month/12,5)
+  year + month - 0.08
+}
+
+# Apply this function to your outlier indices
+outlier_dates <- sapply(outlier_indices, index_to_date, start_year = start_year, start_month = start_month, frequency = 12)
+```
+
+```{r}
+plot(train_ts, main = "Time Series with Outliers Marked", ylab = "Values", xlab = "Time")
+
+points(outlier_dates, train_ts[outlier_indices], col = "red", pch = 19, cex = 1)
+# text(outlier_dates, train_ts[outlier_indices], labels = sprintf("%.2f", outlier_replacements), pos = 3, col = "blue")
+```
+
+# BSTS
+
+## fit1
+```{r}
+ss <- AddLocalLinearTrend(list(), train_ts)
+ss <- AddSeasonal(ss, train_ts, nseasons = 12)
+bsts_fit1 <- bsts(train_ts, state.specification = ss, niter = 100, seed = 31006)
+bsts_pred1 <- predict.bsts(bsts_fit1, h=12, quantiles = c(0.025, 0.975))
+```
+
+
+```{r}
+rmse1 <- forecast::accuracy(bsts_pred1$mean, test_ts)[,2]
+smape1 <- Metrics::smape(bsts_pred1$mean, test_ts)
+```
+
+
+## fit2
+```{r}
+ss <- AddLocalLinearTrend(list(), train_ts)
+ss <- AddSeasonal(ss, train_ts, nseasons = 12)
+bsts_fit2 <- bsts(train_ts ~ unrate_train_ts, 
+                  state.specification = ss, niter = 100, seed = 31006)
+bsts_pred2 <- predict.bsts(bsts_fit2, newdata = unrate_test_ts, quantiles = c(0.025, 0.975))
+```
+
+
+```{r}
+rmse2 <- forecast::accuracy(bsts_pred2$mean, test_ts)[,2]
+smape2 <- smape(bsts_pred2$mean, test_ts)
+```
+
+
+
+## fit3
+```{r}
+ss <- AddDynamicRegression(list(), train_ts ~ unrate_train_ts)
+bsts_fit3 <- bsts(train_ts ~ unrate_train_ts, 
+                  state.specification = ss, niter = 100, seed = 31006)
+bsts_pred3 <- predict.bsts(bsts_fit3, newdata = unrate_test_ts, quantiles = c(0.025, 0.975))
+```
+
+```{r}
+rmse3 <- forecast::accuracy(bsts_pred3$mean, test_ts)[,2]
+smape3 <- smape(bsts_pred3$mean, test_ts)
+```
+
+```{r}
+cbind(test_ts,bsts_pred1$mean)
+```
+
+### Compare
+```{r}
+acc_df <- data.frame(
+  Model = c("Model 1", 
+            "Model 2",
+            "Model 3"),
+  RMSE = c(rmse1, rmse2, rmse3),
+  sMAPE = c(round(smape1,4), round(smape2,4), round(smape3,4))
+)
+knitr::kable(acc_df, caption = 'Accuracy Comparison')
+```
+
+
+
+
+```{r, fig.height=4.2, fig.width=7}
+CompareBstsModels(list("Model 1" = bsts_fit1,
+                       "Model 2" = bsts_fit2,
+                       "Model 3" = bsts_fit3),
+                  colors = c("red", "black", "blue"),
+                  main = "One-Step-Ahead Prediction Errors of Model")
+```
+
+```{r, fig.height=5, fig.width=7}
+bsts_pred1_ts <- ts(bsts_pred1$mean, start = c(2022, 1),end = c(2022, 12), frequency = 12)
+
+# Plot the forecasts and include training data
+autoplot(train_ts, series="Training Data") +
+  autolayer(test_ts, series="Test Data") +
+  autolayer(bsts_pred1_ts, series="Best BSTS Forecast") +
+  ggtitle("Best BSTS Forecast vs Actual") +
+  xlab("Year") + ylab("Total Cases") +
+  theme_minimal() +
+  guides(colour=guide_legend(title="Series"))
+```
+
+
+
+
+```{r, fig.height=4, fig.width=5}
+### Get the number of burn-ins to discard
+burn <- SuggestBurn(0.1, bsts_fit1)
+
+### Get the components
+components.withreg <- cbind.data.frame(
+  colMeans(bsts_fit1$state.contributions[-(1:burn),"trend",]),
+  colMeans(bsts_fit1$state.contributions[-(1:burn),"seasonal.12.1",]),
+  as.Date(time(train_ts)))  
+names(components.withreg) <- c("Trend", "Seasonality", "Date")
+components.withreg <- melt(components.withreg, id.vars="Date")
+names(components.withreg) <- c("Date", "Component", "Value")
+
+ggplot(data=components.withreg, aes(x=Date, y=Value)) + geom_line() + 
+  theme_bw() + theme(legend.title = element_blank()) + ylab("") + xlab("") + 
+  facet_grid(Component ~ ., scales="free") + guides(colour=FALSE) + 
+  theme(axis.text.x=element_text(angle = -90, hjust = 0)) +
+  ggtitle("Visualization the underlying components")
+```
+
+# Model Compare
+
+```{r, fig.height=4, fig.width=15}
+data <- data.frame(
+  Model = c("SARIMA","SARIMA + Intervention", "ETS", "HW", "HTS", "BSTS"),
+  sMAPE = c(0.1451, 0.0875, 0.0872, 0.1379, 0.1037, 0.0732),
+  RMSE = c(3004.72, 1934.71, 2090.74, 2918.20, 2163.34, 1774.88)
+)
+
+plot_rmse <- ggplot(data, aes(x = reorder(Model, RMSE), y = RMSE, fill = "orange")) +
+  geom_bar(stat = "identity", position = position_dodge(), width = 0.7) +
+  geom_text(aes(label = RMSE), vjust = -0.3, color = "black") +
+  labs(x = "", title = "RMSE of 5 Models") +
+  scale_fill_identity() +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+plot_smape <- ggplot(data, aes(x = reorder(Model, sMAPE), y = sMAPE, fill = "darkgreen")) +
+  geom_bar(stat = "identity", position = position_dodge(), width = 0.7) +
+  geom_text(aes(label = sMAPE), vjust = -0.3, color = "black") +
+  labs(x = "", title = "sMAPE of 5 Models") +
+  scale_fill_identity() +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+# Combine the plots
+grid.arrange(plot_rmse, plot_smape, ncol = 2)
+```
+
+
+
+
