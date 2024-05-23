@@ -1,0 +1,116 @@
+---
+title: "TS_Final_Clean"
+author: "Liuyi Pan"
+date: "2024-05-15"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+Sys.setlocale("LC_TIME", "C")
+library(dplyr)
+library(lubridate)
+```
+
+# clean crime data
+```{r}
+crime_data <- read.csv('Crimes_-_2001_to_Present.csv')
+```
+
+
+```{r}
+# Clean the data by selecting specific columns and formatting the date
+clean_crime_data <- crime_data %>% select(Case.Number, Primary.Type, Date)
+clean_crime_data$Date <- mdy_hms(clean_crime_data$Date) %>%  format("%Y-%m")
+```
+
+```{r}
+head(clean_crime_data)
+```
+
+```{r}
+primary_type_summary <- clean_crime_data %>%
+  group_by(Primary.Type) %>%
+  summarise(
+    count = n(),  
+    proportion = n() / nrow(clean_crime_data)  
+  ) %>%
+  arrange(desc(count))  
+
+distinct(primary_type_summary, Primary.Type) 
+```
+
+```{r}
+sorted_crime_data <- clean_crime_data %>%
+  arrange(Date, Case.Number, Primary.Type) %>%
+  group_by(Case.Number) %>%
+  filter(row_number() == 1) 
+```
+
+```{r}
+# Group the data by 'Date' and summarize case counts
+summary_crime_data <- sorted_crime_data %>%
+  group_by(Date) %>%
+  summarise(
+    # level 1
+    total_cases = n(),
+    
+    # level 2
+    # property_cases = sum(Primary.Type %in% c('THEFT', 'BURGLARY', 'MOTOR VEHICLE THEFT', 'ROBBERY', 'ARSON', 'DECEPTIVE PRACTICE', 'CRIMINAL DAMAGE')),
+    # violent_cases = sum(Primary.Type %in% c('BATTERY', 'ASSAULT', 'HOMICIDE', 'KIDNAPPING', 'SEX OFFENSE', 'CRIM SEXUAL ASSAULT', 'CRIMINAL SEXUAL ASSAULT', 'DOMESTIC VIOLENCE', 'STALKING', 'INTIMIDATION')),
+    # public_order_cases = sum(Primary.Type %in% c('NARCOTICS', 'PUBLIC PEACE VIOLATION', 'INTERFERENCE WITH PUBLIC OFFICER', 'WEAPONS VIOLATION', 'CONCEALED CARRY LICENSE VIOLATION', 'LIQUOR LAW VIOLATION', 'PUBLIC INDECENCY')),
+    # other_offenses_cases = sum(Primary.Type %in% c('OTHER OFFENSE', 'PROSTITUTION', 'OFFENSE INVOLVING CHILDREN', 'CRIMINAL TRESPASS', 'GAMBLING', 'OTHER NARCOTIC VIOLATION', 'HUMAN TRAFFICKING', 'OBSCENITY', 'RITUALISM')),
+    # non_criminal_cases = sum(Primary.Type %in% c('NON-CRIMINAL', 'NON - CRIMINAL', 'NON-CRIMINAL (SUBJECT SPECIFIED)')),
+    
+    # level 3
+    # Property Crimes
+    theft_cases = sum(Primary.Type == 'THEFT'),
+    burglary_cases = sum(Primary.Type == 'BURGLARY'),
+    motor_vehicle_theft_cases = sum(Primary.Type == 'MOTOR VEHICLE THEFT'),
+    robbery_cases = sum(Primary.Type == 'ROBBERY'),
+    arson_cases = sum(Primary.Type == 'ARSON'),
+    deceptive_practice_cases = sum(Primary.Type == 'DECEPTIVE PRACTICE'),
+    criminal_damage_cases = sum(Primary.Type == 'CRIMINAL DAMAGE'),
+    
+    # Violent Crimes
+    battery_cases = sum(Primary.Type == 'BATTERY'),
+    assault_cases = sum(Primary.Type == 'ASSAULT'),
+    homicide_cases = sum(Primary.Type == 'HOMICIDE'),
+    kidnapping_cases = sum(Primary.Type == 'KIDNAPPING'),
+    sex_offense_cases = sum(Primary.Type == 'SEX OFFENSE'),
+    crim_sexual_assault_cases = sum(Primary.Type %in% c('CRIM SEXUAL ASSAULT', 'CRIMINAL SEXUAL ASSAULT')),
+    domestic_violence_cases = sum(Primary.Type == 'DOMESTIC VIOLENCE'),
+    stalking_cases = sum(Primary.Type == 'STALKING'),
+    intimidation_cases = sum(Primary.Type == 'INTIMIDATION'),
+    
+    # Public Order Crimes
+    narcotics_cases = sum(Primary.Type == 'NARCOTICS'),
+    public_peace_violation_cases = sum(Primary.Type == 'PUBLIC PEACE VIOLATION'),
+    interference_cases = sum(Primary.Type == 'INTERFERENCE WITH PUBLIC OFFICER'),
+    weapons_violation_cases = sum(Primary.Type == 'WEAPONS VIOLATION'),
+    concealed_carry_cases = sum(Primary.Type == 'CONCEALED CARRY LICENSE VIOLATION'),
+    liquor_law_violation_cases = sum(Primary.Type == 'LIQUOR LAW VIOLATION'),
+    public_indecency_cases = sum(Primary.Type == 'PUBLIC INDECENCY'),
+    
+    # Other Specific Offenses
+    other_offense_cases = sum(Primary.Type == 'OTHER OFFENSE'),
+    prostitution_cases = sum(Primary.Type == 'PROSTITUTION'),
+    children_cases = sum(Primary.Type == 'OFFENSE INVOLVING CHILDREN'),
+    criminal_trespass_cases = sum(Primary.Type == 'CRIMINAL TRESPASS'),
+    gambling_cases = sum(Primary.Type == 'GAMBLING'),
+    ritualism_cases = sum(Primary.Type == 'RITUALISM'),
+    other_narcotic_cases = sum(Primary.Type == 'OTHER NARCOTIC VIOLATION'),
+    human_trafficking_cases = sum(Primary.Type == 'HUMAN TRAFFICKING'),
+    obscenity_cases = sum(Primary.Type == 'OBSCENITY'),
+    
+    # Non-Criminal
+    non_criminal_case = sum(Primary.Type %in% c('NON-CRIMINAL', 'NON - CRIMINAL', 'NON-CRIMINAL (SUBJECT SPECIFIED)'))
+  )
+
+```
+
+
+```{r}
+# Save the summarized data to a new CSV file
+write.csv(summary_crime_data, 'crime_clean.csv', row.names = FALSE)
+```
