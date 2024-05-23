@@ -1,0 +1,213 @@
+---
+title: "TS_crime_Sarima+Intervention"
+author: "Haoyu Zhang"
+date: "2024-05-22"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r}
+library(zoo)
+library(Metrics)
+library(forecast)
+library(ggplot2)
+library(TSA)
+
+crime_data <- read.csv('crime_data_type.csv')
+crime_data <- crime_data[,-1]
+crime_data$Date <- as.yearmon(crime_data$Date, "%Y-%m")
+
+# Convert the entire dataset into a time series object
+crime_ts <- ts(crime_data[, 2], start = c(2001, 1), frequency = 12)
+train_ts <- window(crime_ts, start = c(2001, 1), end = c(2021, 12))
+test_ts <- window(crime_ts, start = c(2022, 1), end = c(2022, 12))
+```
+
+
+```{r}
+# Plot the forecasts and include training data
+autoplot(train_ts) +
+  ggtitle("Total Crime From 2001 to 2021") +
+  xlab("Year") + ylab("Total Cases") +
+  theme_minimal() +
+  guides(colour=guide_legend(title="Series"))
+```
+
+```{r}
+# Plot the forecasts and include training data
+autoplot(log10(train_ts)) +
+  ggtitle("Log Transformation of Total Crime From 2001 to 2021") +
+  xlab("Year") + ylab("log(Total Cases)") +
+  theme_minimal() +
+  guides(colour=guide_legend(title="Series"))
+```
+
+```{r}
+# Plot the forecasts and include training data
+autoplot(diff(train_ts, 12)^2) +
+  ggtitle("Variance of Total Crime after Removed Seasonality") +
+  xlab("Year") + ylab("Variance") +
+  theme_minimal() +
+  guides(colour=guide_legend(title="Series"))
+```
+
+```{r}
+# Plot the forecasts and include training data
+autoplot(diff(log10(train_ts), 12)^2) +
+  ggtitle("Variance of Log(Total Crime) after Removed Seasonality") +
+  xlab("Year") + ylab("Variance") +
+  theme_minimal() +
+  guides(colour=guide_legend(title="Series"))
+```
+
+```{r}
+ts.plot(log10(train_ts))
+tsoutliers(log10(train_ts))
+y_clean <- tsclean(log10(train_ts))
+lines(y_clean, col = 'red')
+```
+
+
+```{r}
+# univariate TS
+# SARIMA
+model_arima <- auto.arima(log10(train_ts))
+summary(model_arima)
+```
+
+```{r}
+# Placeholder for models and their criteria
+possible_models <- list()
+
+# Loop over parameters and drift inclusion
+for (p in 1:3) {
+  for (q in 1:3) {
+    for (P in 0:2) {
+      for (Q in 0:2) {
+        for (drift in c(TRUE, FALSE)) {
+          tryCatch({
+            # Fit the ARIMA model
+            model <- Arima(log10(train_ts), order = c(p, 0, q), seasonal = c(P, 1, Q), include.drift = drift)
+            
+            # Extract criteria
+            aicc <- model$aicc
+            bic <- model$bic
+            
+            # Create a model name
+            model_name <- paste("SARIMA(", p, ", 0,", q, "), (", P, ", 1,", Q, "), drift=", drift, sep = "")
+            
+            # Store the model's criteria
+            possible_models[[model_name]] <- c(aicc, bic)
+          }, error = function(e) {
+            message("Error with model SARIMA(", p, ", 0,", q, "), (", P, ", 1,", Q, "), drift=", drift, ": ", e$message)
+          })
+        }
+      }
+    }
+  }
+}
+
+# Function to find the best model based on a given criterion
+find_best_model <- function(models, criterion_index) {
+  criteria_values <- sapply(models, `[`, criterion_index)
+  best_model_name <- names(models)[which.min(criteria_values)]
+  return(best_model_name)
+}
+
+# Find the best models based on AICc and BIC
+best_aicc_model <- find_best_model(possible_models, 1)
+best_bic_model <- find_best_model(possible_models, 2)
+
+print(paste("Best AICc model:", best_aicc_model))
+print(paste("Best BIC model:", best_bic_model))
+
+# Optionally, you can also print the AICc and BIC values for these best models
+print(possible_models[[best_aicc_model]])
+print(possible_models[[best_bic_model]])
+
+```
+I will choose the best BIC model with no drift.
+
+```{r}
+model_arima1 <- Arima(log10(train_ts), order = c(2, 0, 1), seasonal = c(0, 1, 1))
+summary(model_arima1)
+```
+
+```{r}
+ts.plot(model_arima1$residuals, ylab = 'Residual', main = "Residual Plot of SARIMA")
+```
+
+```{r}
+acf(model_arima1$residuals, lag = 300, main = "Residual SARIMA Model ACF Plot")
+```
+
+
+There is a huge intervention casued by Covid, then I will fit intervention analysis based on Sarima model.
+
+
+```{r}
+# Test it
+pred1 <- forecast(model_arima1, h = length(test_ts))
+original_pred1_arima <- 10^pred1$mean
+```
+
+```{r}
+# Plot the forecasts and include training data
+autoplot(train_ts, series="Training Data") +
+  autolayer(test_ts, series="Test Data") +
+  autolayer(original_pred1_arima, series="SARIMA(2,0,1)(0,1,1) Forecast") +
+  ggtitle("SARIMA(2,0,1)(0,1,1) Forecast vs Actual") +
+  xlab("Year") + ylab("Total Cases") +
+  theme_minimal() +
+  guides(colour=guide_legend(title="Series"))
+```
+
+
+```{r}
+rmse_sarima <- forecast::accuracy(original_pred1_arima, test_ts)[,2]
+smape_sarima <- Metrics::smape(original_pred1_arima, test_ts)
+print(paste("RMSE for SARIMA model:", rmse_sarima))
+print(paste("sMAPE for SARIMA model:", smape_sarima))
+```
+
+
+Let's try intervention analysis.
+
+```{r}
+crimes.pre.intervention <- window(log10(train_ts), end=c(2020,2))
+pre_int <- Arima(crimes.pre.intervention, order = c(2,0,1), seasonal = c(0,1,1))
+PCovid <- 1*(seq(train_ts)==231)
+
+crime.mPulse <- arimax(log10(train_ts),order=c(2,0,1),seasonal=list(order=c(0,1,1), period=12), xtransf=data.frame(PCovid), transfer=list(c(1,0)), method='ML')
+crime.mPulse
+plot(ts(filter(PCovid, filter=0.9720, method='recursive', side=1)*(-0.1255), frequency = 12, start=2001), 
+     type='h',ylab='Covid Pulse Effects')
+```
+
+```{r}
+steps.ahead = 12
+
+tf<-filter(1*(seq(1:(length(train_ts) + steps.ahead))==231), filter=0.9720, method='recursive',side=1) * (-0.1255)
+forecast.arima<-Arima(log10(train_ts), order=c(2,0,1), seasonal = c(0,1,1), xreg=tf[1:(length(tf) - steps.ahead)])
+forecast.arima
+start_idx = length(tf) - steps.ahead + 1
+pred_intervention <- predict(forecast.arima, n.ahead = steps.ahead, newxreg=tf[start_idx:length(tf)])
+
+predicted_original_intervention <- 10^pred_intervention$pred
+
+rmse_intervention <- forecast::accuracy(predicted_original_intervention, test_ts)[,2]
+smape_intervention <- Metrics::smape(predicted_original_intervention, test_ts)
+print(paste("RMSE for intervention model:", rmse_intervention))
+print(paste("sMAPE for intervention model:", smape_intervention))
+
+predicted_original_intervention_ts <- ts(predicted_original_intervention, start = c(2022, 1), frequency = 12)
+
+autoplot(train_ts, series="Training Data") +
+  autolayer(test_ts, series="Test Data") +
+  autolayer(predicted_original_intervention_ts, series="Intervention Analysis Forecast") +
+  ggtitle("Intervention Analysis Forecast vs Actual") +
+  xlab("Year") + ylab("Total Cases") +
+  theme_minimal() +
+  guides(colour=guide_legend(title="Series"))
+```
