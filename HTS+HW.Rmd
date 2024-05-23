@@ -1,0 +1,131 @@
+---
+title: "ADSP31006_FinalProject"
+author: "Marian Xu"
+date: "2024-05-15"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+Sys.setlocale("LC_TIME", "C")
+library(dplyr)
+library(forecast)
+library(TSA)
+library(Metrics)
+library(hts)
+library(ggplot2)
+library(zoo)
+```
+
+# Prepare Data
+
+## crime data
+```{r}
+crime_clean <- read.csv("~/Documents/ADSP31006/crime_clean (1).csv")
+crime_clean$Date <- as.yearmon(crime_clean$Date, "%Y-%m")
+```
+
+```{r}
+# Convert the entire dataset into a time series object
+crime_ts <- ts(crime_clean[, 3:35], start = c(2001, 1), frequency = 12)
+
+train_ts <- window(crime_ts, start = c(2001, 1), end = c(2021, 12))
+test_ts <- window(crime_ts, start = c(2022, 1), end = c(2022, 12))
+```
+
+
+## HTS
+
+```{r}
+nodes <- list(5, c(7, 9, 7, 9, 1))
+hts_data <- hts(train_ts, nodes = nodes)
+hts_pred <- forecast(hts_data, h=12)
+```
+```{r, fig.height=9, fig.width=6}
+plot(hts_pred)
+```
+
+
+```{r}
+hts_pred_ts <- ts(rowSums(hts_pred$bts, na.rm = TRUE), start = start(test_ts), frequency = 12)
+total_train_ts <- ts(rowSums(train_ts, na.rm = TRUE), start = start(train_ts), frequency = 12)
+total_test_ts <- ts(rowSums(test_ts, na.rm = TRUE), start = start(test_ts), frequency = 12)
+
+forecast::accuracy(hts_pred_ts, total_test_ts)
+smape(hts_pred_ts, total_test_ts)
+```
+
+
+```{r}
+# Plot the forecasts and include training data
+autoplot(total_train_ts, series="Training Data") +
+  autolayer(total_test_ts, series="Test Data") +
+  autolayer(hts_pred_ts, series="HTS Forecast") +
+  ggtitle("HTS Forecast vs Actual") +
+  xlab("Year") + ylab("Total Cases") +
+  theme_minimal() +
+  guides(colour=guide_legend(title="Series"))
+```
+
+
+```{r}
+hts_pred_ts <- ts(hts_pred$bts[,1], start = c(2022, 1),end = c(2022, 12), frequency = 12)
+
+# Plot the forecasts and include training data
+autoplot(train_ts, series="Training Data") +
+  autolayer(test_ts, series="Test Data") +
+  autolayer(hts_pred_ts, series="Best HTS Forecast") +
+  ggtitle("Best HTS Forecast vs Actual") +
+  xlab("Year") + ylab("Total Cases") +
+  theme_minimal() +
+  guides(colour=guide_legend(title="Series"))
+
+```
+
+```{r}
+crime_clean$Date <- as.yearmon(crime_clean$Date, "%Y-%m")
+```
+
+```{r}
+
+# Convert the entire dataset into a time series object
+crime_ts <- ts(crime_clean[, 2], start = c(2001, 1), frequency = 12)
+train_ts <- window(crime_ts, start = c(2001, 1), end = c(2021, 12))
+test_ts <- window(crime_ts, start = c(2022, 1), end = c(2022, 12))
+
+```
+
+
+# Holt Winters
+```{r}
+# Fit the Holt-Winters model
+hw_model <- hw(train_ts, seasonal = "multiplicative")
+summary(hw_model)
+```
+
+```{r}
+# Forecast using the Holt-Winters model
+hw_forecast <- forecast(hw_model, h = 12)
+print(hw_forecast)
+```
+
+```{r}
+forecast::accuracy(hw_forecast$mean, test_ts)
+smape(hw_forecast$mean, test_ts)
+```
+```{r, fig.height=5, fig.width=7}
+hw_pred_ts <- ts(hw_forecast$mean, start = c(2022, 1),end = c(2022, 12), frequency = 12)
+
+# Plot the forecasts and include training data
+autoplot(train_ts, series="Training Data") +
+  autolayer(test_ts, series="Test Data") +
+  autolayer(hw_pred_ts, series="Holt Winter Forecast") +
+  ggtitle("Holt Winter Forecast vs Actual") +
+  xlab("Year") + ylab("Total Cases") +
+  theme_minimal() +
+  guides(colour=guide_legend(title="Series"))
+```
+
+
+
+
